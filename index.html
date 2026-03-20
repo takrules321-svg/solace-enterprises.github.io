@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solace v48.2 - Cloud</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+    <style>
+        :root { --sol-bg: #000000; --sol-sidebar: #0f0f0f; --sol-card: #141414; --sol-red: #ff0000; --sol-white: #ffffff; }
+        body { background-color: var(--sol-bg); color: var(--sol-white); font-family: 'Inter', sans-serif; margin: 0; overflow-x: hidden; }
+        .sidebar { width: 260px; height: 100vh; background: var(--sol-sidebar); position: fixed; left: 0; top: 0; border-right: 1px solid #222; transition: 0.3s; z-index: 2000; overflow: hidden; }
+        .sidebar.collapsed { width: 0px; border: none; }
+        .main-panel { margin-left: 260px; padding: 25px; transition: 0.3s; }
+        .sidebar.collapsed ~ .main-panel { margin-left: 0px; }
+        .top-control { position: fixed; top: 15px; right: 20px; z-index: 3000; display: flex; align-items: center; gap: 15px; }
+        .burger-btn { background: var(--sol-card); border: 1px solid #333; color: white; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
+        .sol-card { background: var(--sol-card); border-radius: 12px; padding: 20px; margin-bottom: 20px; border: 1px solid #222; }
+        .sol-input { background: #000 !important; border: 1px solid #333 !important; color: white !important; font-size: 0.9rem; }
+        .btn-red { background: var(--sol-red); color: white; border: none; font-weight: bold; padding: 10px 20px; border-radius: 6px; text-transform: uppercase; }
+        .nav-link { color: var(--sol-white); padding: 12px 25px; border-radius: 0 50px 50px 0; border: none; background: transparent; width: 95%; text-align: left; display: flex; align-items: center; gap: 15px; }
+        .nav-link.active { background: #1a1a1a; border-left: 5px solid var(--sol-red); color: var(--sol-red); }
+        #login-overlay { position: fixed; inset: 0; background: var(--sol-bg); z-index: 10000; display: flex; align-items: center; justify-content: center; }
+        .login-card { width: 360px; padding: 40px; background: var(--sol-sidebar); border-radius: 16px; border: 1px solid #333; text-align: center; }
+        .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); border-top: 1px solid #333; border-left: 1px solid #333; min-width: 800px; }
+        .cal-day { min-height: 110px; border-right: 1px solid #222; border-bottom: 1px solid #222; padding: 8px; font-size: 0.75rem; }
+        .cal-event { font-size: 0.65rem; padding: 3px 6px; border-radius: 4px; margin-top: 4px; display: block; overflow: hidden; white-space: nowrap; }
+        @media (max-width: 768px) { .main-panel { padding-top: 70px; } }
+    </style>
+</head>
+<body onload="checkSession()">
+
+<div id="login-overlay">
+    <div class="login-card">
+        <h1 class="fw-bold mb-2" style="color:var(--sol-red); letter-spacing: 5px;">SOLACE</h1>
+        <p class="text-muted small mb-4">CLOUD DATABASE ACTIVE</p>
+        <input type="text" id="u-in" class="form-control sol-input mb-3 text-center" placeholder="USERNAME">
+        <input type="password" id="p-in" class="form-control sol-input mb-3 text-center" placeholder="PASSWORD">
+        <button class="btn btn-red w-100 py-2" onclick="login()">Initialize</button>
+    </div>
+</div>
+
+<div class="top-control" id="top-ui" style="display:none">
+    <div id="sync-indicator" class="badge bg-success opacity-75 small me-2" style="display:none">Synced</div>
+    <div class="badge bg-danger px-3 py-2" id="user-display"></div>
+    <button class="burger-btn" onclick="toggleSidebar()"><i class="bi bi-list fs-4"></i></button>
+</div>
+
+<div class="sidebar collapsed" id="sidebar" style="display:none">
+    <div class="p-4 mb-2"><h2 class="fw-bold m-0" style="color:var(--sol-red); letter-spacing: 2px;">SOLACE</h2></div>
+    <div class="nav flex-column mt-3">
+        <button class="nav-link active" onclick="showTab('tab-pro', this)"><i class="bi bi-stack"></i> Projects</button>
+        <button class="nav-link" onclick="showTab('tab-cust', this)"><i class="bi bi-people"></i> Customers</button>
+        <button class="nav-link" onclick="showTab('tab-cal', this); renderCalendar()"><i class="bi bi-calendar3"></i> Calendar</button>
+        <button class="nav-link" onclick="showTab('tab-inv', this)"><i class="bi bi-box-seam"></i> Inventory</button>
+        <button class="nav-link" onclick="showTab('tab-chk', this)"><i class="bi bi-check2-square"></i> Checklist</button>
+        <button class="nav-link" onclick="showTab('tab-fin', this)"><i class="bi bi-currency-rupee"></i> Financials</button>
+        <button class="nav-link admin-only" onclick="showTab('tab-acc', this)"><i class="bi bi-shield-lock"></i> Administration</button>
+        <div class="mt-auto p-3"><button class="btn btn-outline-danger w-100 btn-sm" onclick="logout()">Logoff</button></div>
+    </div>
+</div>
+
+<div class="main-panel" id="main-panel" style="display:none">
+    <div class="d-flex justify-content-between align-items-center mb-4 border-bottom border-secondary pb-3">
+        <h4 class="fw-bold text-uppercase m-0" id="tab-label">Projects</h4>
+    </div>
+
+    <div class="tab-content">
+        <div class="tab-pane fade show active" id="tab-pro">
+            <div class="sol-card admin-only"><div class="row g-2"><div class="col-md-3"><input type="text" id="p-n" class="form-control sol-input" placeholder="Client"></div><div class="col-md-3"><input type="text" id="p-a" class="form-control sol-input" placeholder="Apt"></div><div class="col-md-2"><input type="date" id="p-s" class="form-control sol-input"></div><div class="col-md-2"><input type="date" id="p-e" class="form-control sol-input"></div><div class="col-md-2"><button class="btn btn-red w-100" onclick="addItem('projects')">Create</button></div></div></div>
+            <div class="table-responsive sol-card p-0"><table class="table m-0"><thead><tr><th>Client</th><th>Apt</th><th>Status</th><th>Action</th></tr></thead><tbody id="list-pro"></tbody></table></div>
+        </div>
+        <div class="tab-pane fade" id="tab-cust">
+            <div class="sol-card admin-only"><div class="row g-2"><div class="col-md-4"><input type="text" id="c-n" class="form-control sol-input" placeholder="Name"></div><div class="col-md-4"><input type="text" id="c-s" class="form-control sol-input" placeholder="Society"></div><div class="col-md-2"><input type="date" id="c-d" class="form-control sol-input"></div><div class="col-md-2"><button class="btn btn-red w-100" onclick="addItem('customers')">Add</button></div></div></div>
+            <div class="table-responsive sol-card p-0"><table class="table m-0"><thead><tr><th>Name</th><th>Society</th><th>Date</th><th>Action</th></tr></thead><tbody id="list-cust"></tbody></table></div>
+        </div>
+        <div class="tab-pane fade" id="tab-cal">
+            <div class="sol-card p-0 overflow-auto">
+                <div class="p-3 d-flex justify-content-between bg-dark align-items-center">
+                    <button class="btn btn-sm btn-outline-light" onclick="changeMonth(-1)"><i class="bi bi-chevron-left"></i></button>
+                    <h5 class="m-0 fw-bold text-uppercase" id="cal-month-label"></h5>
+                    <button class="btn btn-sm btn-outline-light" onclick="changeMonth(1)"><i class="bi bi-chevron-right"></i></button>
+                </div>
+                <div class="cal-grid" id="calendar-body"></div>
+            </div>
+        </div>
+        <div class="tab-pane fade" id="tab-inv">
+            <div class="sol-card admin-only"><div class="row g-2"><div class="col-md-7"><input type="text" id="i-n" class="form-control sol-input" placeholder="Item"></div><div class="col-md-3"><input type="number" id="i-q" class="form-control sol-input" placeholder="Qty"></div><div class="col-md-2"><button class="btn btn-red w-100" onclick="addItem('inventory')">Stock</button></div></div></div>
+            <div class="table-responsive sol-card p-0"><table class="table m-0"><thead><tr><th>Item</th><th>Qty</th><th>Status</th><th>Action</th></tr></thead><tbody id="list-inv"></tbody></table></div>
+        </div>
+        <div class="tab-pane fade" id="tab-chk">
+            <div class="sol-card admin-only"><div class="row g-2"><div class="col-10"><input type="text" id="tk-n" class="form-control sol-input" placeholder="New Task..."></div><div class="col-2"><button class="btn btn-red w-100" onclick="addItem('tasks')">Post</button></div></div></div>
+            <div class="sol-card p-0" id="list-chk"></div>
+        </div>
+        <div class="tab-pane fade" id="tab-fin">
+            <div class="table-responsive sol-card p-0"><table class="table m-0"><thead><tr><th>Desc</th><th>Amount</th><th>Action</th></tr></thead><tbody id="list-fin"></tbody></table><div class="p-3 bg-dark d-flex justify-content-between"><span>Total:</span><h4 id="fin-total" class="m-0 fw-bold text-danger"></h4></div></div>
+        </div>
+        <div class="tab-pane fade" id="tab-acc">
+            <div class="sol-card"><h6 class="text-danger fw-bold mb-3">CREATE USER</h6><div class="row g-2"><div class="col-md-4"><input type="text" id="nu-u" class="form-control sol-input" placeholder="User"></div><div class="col-md-4"><input type="text" id="nu-p" class="form-control sol-input" placeholder="Pass"></div><div class="col-md-2"><select id="nu-r" class="form-select sol-input"><option>Employee</option><option>Manager</option><option>Managing Partner</option></select></div><div class="col-md-2"><button class="btn btn-red w-100" onclick="addUser()">Create</button></div></div></div>
+            <div class="table-responsive sol-card p-0 mt-4"><table class="table m-0"><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Action</th></tr></thead><tbody id="list-acc"></tbody></table></div>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js";
+  import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-database.js";
+
+  // 1. YOUR ACTUAL CONFIG
+  const firebaseConfig = {
+    apiKey: "AIzaSyCIJpuucTWRw2U8xNmLp3gkOw-fzgTeh5I",
+    authDomain: "solace-2c588.firebaseapp.com",
+    databaseURL: "https://solace-2c588-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "solace-2c588",
+    storageBucket: "solace-2c588.firebasestorage.app",
+    messagingSenderId: "392117139934",
+    appId: "1:392117139934:web:4ce22952dad1dbcabec54f",
+    measurementId: "G-JCBHD7VQJ8"
+  };
+
+  // 2. INITIALIZE
+  const app = initializeApp(firebaseConfig);
+  const db_cloud = getDatabase(app);
+  const solaceRef = ref(db_cloud, 'solace_data');
+
+  // App State
+  window.db = { projects: [], finance: [], tasks: [], notes: [], users: [{u: 'taksheel', p: 'tvsk2009@', role: 'Managing Partner'}] };
+  let sessionUser = null;
+
+  // 3. CORE FIREBASE FUNCTIONS
+  // Sync from Cloud to UI
+  onValue(solaceRef, (snapshot) => {
+    const data = snapshot.val();
+    if (data) {
+      window.db = data;
+      // Re-fill defaults if cloud is empty
+      if(!window.db.users) window.db.users = [{u: 'taksheel', p: 'tvsk2009@', role: 'Managing Partner'}];
+      render();
+    }
+  });
+
+  // Save to Cloud
+  window.saveToCloud = () => {
+    set(solaceRef, window.db);
+  };
+
+  // 4. ATTACH ACTIONS TO WINDOW (For HTML Button Access)
+  window.addItem = (type) => {
+    if(type==='projects') {
+        window.db.projects = window.db.projects || [];
+        window.db.projects.push({
+            id: Date.now(), 
+            n: document.getElementById('p-n').value, 
+            a: document.getElementById('p-a').value, 
+            status: 'Structure Done'
+        });
+    }
+    if(type==='finance') {
+        window.db.finance = window.db.finance || [];
+        window.db.finance.push({
+            id: Date.now(), 
+            d: document.getElementById('f-d').value, 
+            a: parseFloat(document.getElementById('f-a').value)
+        });
+    }
+    window.saveToCloud();
+  };
+
+  window.del = (t, id) => {
+    window.db[t] = window.db[t].filter(x => x.id !== id);
+    window.saveToCloud();
+  };
+
+  // Auth Logic
+  window.login = () => {
+    const u = document.getElementById('u-in').value;
+    const p = document.getElementById('p-in').value;
+    const user = window.db.users.find(x => x.u === u && x.p === p);
+    
+    if(user) {
+        sessionUser = user;
+        document.getElementById('login-overlay').style.display='none';
+        document.getElementById('sidebar').style.display='block';
+        document.getElementById('main-panel').style.display='block';
+        document.getElementById('top-ui').style.display='flex';
+        document.getElementById('user-display').innerText = sessionUser.u;
+        render();
+    } else {
+        alert("Invalid System Credentials.");
+    }
+  };
+
+  // Rendering logic
+  function render() {
+    const pList = document.getElementById('list-pro');
+    if(pList && window.db.projects) {
+        pList.innerHTML = window.db.projects.map(x => `
+            <tr>
+                <td>${x.n}</td>
+                <td>${x.a}</td>
+                <td><span class="badge bg-secondary">${x.status}</span></td>
+                <td><i class="bi bi-trash text-danger pointer" onclick="del('projects',${x.id})"></i></td>
+            </tr>`).join('');
+    }
+
+    const fList = document.getElementById('list-fin');
+    if(fList && window.db.finance) {
+        let total = 0;
+        fList.innerHTML = window.db.finance.map(x => {
+            total += x.a;
+            return `<tr><td>${x.d}</td><td class="text-danger">₹${x.a}</td><td><i class="bi bi-trash text-danger pointer" onclick="del('finance',${x.id})"></i></td></tr>`;
+        }).join('');
+        document.getElementById('fin-total').innerText = "₹" + total;
+    }
+  }
+</script>
+</body>
+</html>
